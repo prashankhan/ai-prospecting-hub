@@ -21,12 +21,12 @@ export default async function SetupPage() {
   const status = configurationStatus();
   const ready = status.supabase && status.serviceRole && status.setupToken;
   let hasAdmin = false;
-  let dbError = false;
+  let dbError: string | null = null;
   if (ready) {
     try {
       hasAdmin = await adminExists();
-    } catch {
-      dbError = true;
+    } catch (err) {
+      dbError = err instanceof Error ? err.message : "Couldn't reach the database.";
     }
   }
   return (
@@ -47,7 +47,7 @@ export default async function SetupPage() {
         {!ready ? (
           <p className="text-sm text-muted-foreground">Add the missing environment variables (see README → Configuration), redeploy, then reload this page.</p>
         ) : dbError ? (
-          <p className="text-sm text-danger">Couldn&apos;t reach the database. Check the Supabase keys and that the migrations have been applied.</p>
+          <p className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">{dbError}</p>
         ) : hasAdmin ? (
           <p className="text-sm text-muted-foreground">Setup is complete. <Link className="text-accent hover:underline" href="/login">Sign in</Link></p>
         ) : (

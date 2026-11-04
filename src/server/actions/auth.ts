@@ -49,7 +49,15 @@ function tokenMatches(input: string, expected: string) {
 
 export async function adminExists(): Promise<boolean> {
   const admin = createAdminClient();
-  const { count } = await admin.from("profiles").select("id", { count: "exact", head: true }).eq("app_role", "admin");
+  const { count, error } = await admin.from("profiles").select("id", { count: "exact", head: true }).eq("app_role", "admin");
+  if (error) {
+    // Don't treat an unreachable database or a rejected key as "no admin yet".
+    throw new UserFacingError(
+      /401|invalid api key|jwt/i.test(`${error.code} ${error.message}`) || !error.message
+        ? "Supabase rejected SUPABASE_SERVICE_ROLE_KEY. Copy the secret (service role) key for this project into your hosting environment and redeploy."
+        : `Couldn't query the database: ${error.message}`,
+    );
+  }
   return (count ?? 0) > 0;
 }
 
@@ -65,6 +73,7 @@ export async function bootstrapAdmin(_: unknown, form: FormData): Promise<Action
     const admin = createAdminClient();
     // Durable rate limit across serverless instances: at most 10 failed attempts per 15 minutes.
     const since = new Date(Date.now() - 15 * 60_000).toISOString();
+    if (await adminExists()) throw new UserFacingError("An administrator already exists. Sign in instead.");
     const { count: failures } = await admin.from("audit_logs").select("id", { count: "exact", head: true }).eq("action", "auth.setup_failed").gte("created_at", since);
     if ((failures ?? 0) >= 10) throw new UserFacingError("Too many failed attempts. Try again in 15 minutes.");
     if (!tokenMatches(token, setupToken)) {
@@ -82,7 +91,13 @@ export async function bootstrapAdmin(_: unknown, form: FormData): Promise<Action
       email_confirm: true,
       user_metadata: { full_name: parsed.full_name },
     });
-    if (error || !data.user) throw new UserFacingError(error?.message ?? "Could not create the account.");
+    if (error || !data.user) {
+      throw new UserFacingError(
+        /invalid api key/i.test(error?.message ?? "")
+          ? "Supabase rejected SUPABASE_SERVICE_ROLE_KEY. Copy the secret (service role) key for this project into your hosting environment and redeploy."
+          : error?.message ?? "Could not create the account.",
+      );
+    }
     const { error: roleError } = await admin
       .from("profiles")
       .upsert({ id: data.user.id, email: parsed.email, full_name: parsed.full_name, app_role: "admin" });
