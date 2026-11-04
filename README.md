@@ -85,6 +85,7 @@ Migrations live in `supabase/migrations` and must be applied in filename order:
 2. `…02_security.sql` — authorization helpers, guard triggers, Row Level Security
 3. `…03_functions.sql` — atomic identity ingestion, ambiguous-match resolution, do-not-contact, job leasing, reporting
 4. `…04_seed_project.sql` — the initial, editable Tattoo IQ project (no prospect records)
+5. `…05_harden_function_grants.sql` — tightened function privileges (Supabase security advisor)
 
 With the Supabase CLI:
 
