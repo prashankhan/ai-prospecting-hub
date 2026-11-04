@@ -366,6 +366,7 @@ export type Database = {
           origin: string;
           provider: string | null;
           model: string | null;
+          metadata: Json;
           created_by: string | null;
           approved_by: string | null;
           approved_at: string | null;
@@ -382,6 +383,7 @@ export type Database = {
           origin: string;
           provider?: string | null;
           model?: string | null;
+          metadata?: Json;
           created_by?: string | null;
           approved_by?: string | null;
           approved_at?: string | null;
@@ -398,6 +400,7 @@ export type Database = {
           origin?: string;
           provider?: string | null;
           model?: string | null;
+          metadata?: Json;
           created_by?: string | null;
           approved_by?: string | null;
           approved_at?: string | null;

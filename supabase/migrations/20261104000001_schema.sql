@@ -334,6 +334,7 @@ create table public.message_drafts (
   origin text not null check (origin in ('ai', 'manual')),
   provider text,
   model text,
+  metadata jsonb not null default '{}'::jsonb,
   created_by uuid references public.profiles (id) on delete set null,
   approved_by uuid references public.profiles (id) on delete set null,
   approved_at timestamptz,
