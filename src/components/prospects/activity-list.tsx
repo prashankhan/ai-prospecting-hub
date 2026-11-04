@@ -15,6 +15,7 @@ const LABELS: Record<string, string> = {
   qualified: "AI qualification",
   instagram_verified: "Instagram verified",
   refreshed: "Research refreshed",
+  discovered: "Discovered by the agent",
 };
 
 export function ActivityList({ items, names }: { items: Activity[]; names: Record<string, string> }) {

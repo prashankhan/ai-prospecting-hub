@@ -62,3 +62,15 @@ export function decideQualificationStatus(
   }
   return "needs_review";
 }
+
+/** Gemini's check of a discovered website: is this a real, single business that matches the search? */
+export const businessValidationSchema = z.object({
+  is_business_website: z.boolean(),
+  matches_target: z.boolean(),
+  business_name: z.string().trim().max(200).nullable(),
+  category: z.string().trim().max(120).nullable(),
+  city: z.string().trim().max(120).nullable(),
+  country: z.string().trim().max(80).nullable(),
+  reason: z.string().trim().min(3).max(400),
+});
+export type BusinessValidation = z.infer<typeof businessValidationSchema>;

@@ -6,7 +6,8 @@ import { DISCOVERY_PROVIDER_IDS } from "@/lib/discovery/types";
 import { decryptSecret, encryptSecret, hasEncryptionKey, redactSecrets, secretHint } from "@/lib/security/crypto";
 import { createAdminClient, type AdminClient } from "@/lib/supabase/admin";
 import type { TablesUpdate } from "@/lib/supabase/database.types";
-import { getDiscoveryAdapter } from "../providers";
+import { WEB_SEARCH_PROVIDER_IDS, type WebSearchProviderId } from "@/lib/discovery/web/providers";
+import { getDiscoveryAdapter, getWebSearchCredentials } from "../providers";
 import { authorize } from "../session";
 import { run, UserFacingError, type ActionResult } from "../result";
 import { logAudit } from "../settings";
@@ -52,8 +53,16 @@ export async function saveProviderConfig(input: z.infer<typeof saveSchema>): Pro
       patch.last_error = null;
       patch.last_tested_at = null;
     }
-    const hasSecret = Boolean(data.apiKey || row.encrypted_secret);
-    if (data.enabled && !hasSecret) throw new UserFacingError("Add an API key before enabling this provider.");
+    if (provider === "gemini_search") {
+      // Uses the Gemini AI credential; there is no separate key to store.
+      delete patch.encrypted_secret;
+      delete patch.secret_hint;
+      if (data.enabled) await getWebSearchCredentials(db, "gemini_search", { requireEnabled: false });
+      patch.status = data.enabled ? (row.status === "verified" ? "verified" : "configured") : "unconfigured";
+    } else {
+      const hasSecret = Boolean(data.apiKey || row.encrypted_secret);
+      if (data.enabled && !hasSecret) throw new UserFacingError("Add an API key before enabling this provider.");
+    }
     if (data.enabled && data.kind === "ai" && !(data.model ?? row.model)) throw new UserFacingError("Select a model before enabling this provider.");
     // First enabled AI provider becomes the default automatically.
     if (data.kind === "ai" && data.enabled) {
@@ -112,7 +121,16 @@ export async function testProviderConnection(kind: "ai" | "discovery", provider:
     const id = providerFor(k).parse(provider);
     const db = createAdminClient();
     const row = await ensureRow(db, k, id);
-    const key = apiKey?.trim() || (row.encrypted_secret ? decryptSecret(row.encrypted_secret) : "");
+    const isWeb = (WEB_SEARCH_PROVIDER_IDS as readonly string[]).includes(id);
+    let key = apiKey?.trim() || (row.encrypted_secret ? decryptSecret(row.encrypted_secret) : "");
+    let webCred: { apiKey: string; model?: string } | null = null;
+    if (id === "gemini_search") {
+      const { cred } = await getWebSearchCredentials(db, "gemini_search", { requireEnabled: false });
+      webCred = cred;
+      key = cred.apiKey;
+    } else if (isWeb) {
+      webCred = { apiKey: key };
+    }
     if (!key) throw new UserFacingError("Enter an API key to test.");
     try {
       let models: string[] = [];
@@ -121,13 +139,18 @@ export async function testProviderConnection(kind: "ai" | "discovery", provider:
         const res = await getAIAdapter(id as (typeof AI_PROVIDER_IDS)[number]).testConnection(key);
         models = res.models;
         message = res.message;
+      } else if (isWeb && webCred) {
+        const { getWebSearchAdapter } = await import("@/lib/discovery/web/providers");
+        const res = await getWebSearchAdapter(id as WebSearchProviderId).testConnection(webCred);
+        message = res.message;
+        await recordUsage(db, { kind: "discovery", provider: id, operation: "connection_test", userId: user.id, success: true });
       } else {
-        const res = await getDiscoveryAdapter(id as (typeof DISCOVERY_PROVIDER_IDS)[number]).testConnection(key);
+        const res = await getDiscoveryAdapter("google_places").testConnection(key);
         message = res.message;
         await recordUsage(db, { kind: "discovery", provider: id, operation: "connection_test", userId: user.id, success: true });
       }
       // Only mark verified when the stored key is the one that was tested.
-      if (!apiKey?.trim() || (row.encrypted_secret && decryptSecret(row.encrypted_secret) === key)) {
+      if (id === "gemini_search" || !apiKey?.trim() || (row.encrypted_secret && decryptSecret(row.encrypted_secret) === key)) {
         await db.from("provider_configs").update({ status: "verified", last_tested_at: new Date().toISOString(), last_error: null, settings: { ...((row.settings ?? {}) as Record<string, unknown>), models: models.slice(0, 300) } as never }).eq("id", row.id);
       }
       await logAudit(db, { actorId: user.id, action: "provider.test", details: { kind: k, provider: id, ok: true } });

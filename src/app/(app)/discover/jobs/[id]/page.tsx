@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { CancelJobButton, JobProgressDriver } from "@/components/discover/job-progress";
 import { JOB_TYPE_LABELS, JobStatusBadge } from "@/components/discover/job-status";
 import { Badge } from "@/components/ui/badge";
+import { InstagramStatusBadge } from "@/components/app/status-badges";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
@@ -25,7 +26,10 @@ const OUTCOME: Record<string, { label: string; tone: "success" | "info" | "neutr
   failed: { label: "Failed", tone: "danger" },
   processed: { label: "Done", tone: "success" },
   job_failed: { label: "Job failed", tone: "danger" },
+  search: { label: "Search", tone: "neutral" },
 };
+
+const WEB_PROVIDERS: Record<string, string> = { gemini_search: "Gemini · Google Search", serper: "Serper", brave: "Brave Search" };
 
 export default async function JobPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ outcome?: string }> }) {
   const { id } = await params;
@@ -40,8 +44,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const { data: events } = await eventsQuery;
   const active = job.status === "queued" || job.status === "running";
   const isDiscovery = job.type === "discovery";
-  const pct = job.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : active ? 5 : 100;
-  const p = (job.params ?? {}) as { query?: { keywords?: string; city?: string; country?: string; exclusions?: string[] }; file_name?: string; max_results?: number };
+  const basePct = job.total ? Math.min(100, Math.round((job.processed / job.total) * 100)) : active ? 5 : 100;
+  const p = (job.params ?? {}) as { query?: { keywords?: string; city?: string; country?: string; exclusions?: string[] }; file_name?: string; max_results?: number; target_count?: number; max_searches?: number; require_verified_instagram?: boolean };
+  const isWebJob = isDiscovery && Boolean(job.provider && WEB_PROVIDERS[job.provider]);
+  const wc = (job.cursor ?? {}) as { accepted?: number; searches?: number; examined?: number; pending?: unknown[] };
+  const webPct = isWebJob && p.target_count ? Math.min(100, Math.round(((wc.accepted ?? 0) / p.target_count) * 100)) : null;
 
   const stats = isDiscovery
     ? [["New profiles", job.new_count, "new"], ["Already known", job.known_count, "known_added"], ["Skipped", job.skipped_count, "skipped_existing"], ["Ambiguous", job.ambiguous_count, "ambiguous"], ["Failed", job.failed_count, "failed"]] as const
@@ -55,10 +62,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
-              {job.provider === "csv" ? "CSV import" : JOB_TYPE_LABELS[job.type]} <JobStatusBadge status={job.status} />
+              {job.provider === "csv" ? "CSV import" : isWebJob ? "Agent discovery" : JOB_TYPE_LABELS[job.type]} <JobStatusBadge status={job.status} />
             </h1>
             <p className="text-sm text-muted-foreground">
-              {job.provider === "csv" ? p.file_name : isDiscovery ? [p.query?.keywords, p.query?.city, p.query?.country].filter(Boolean).join(" · ") : `${job.total} prospects`}
+              {job.provider === "csv" ? p.file_name : isDiscovery ? [p.query?.keywords, p.query?.city, p.query?.country, isWebJob ? WEB_PROVIDERS[job.provider!] : null].filter(Boolean).join(" · ") : `${job.total} prospects`}
               {" · "}Started {formatDateTime(job.created_at)}{job.finished_at && ` · Finished ${formatDateTime(job.finished_at)}`}
             </p>
           </div>
@@ -74,11 +81,16 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <CardContent className="flex flex-col gap-4">
           <div>
             <div className="mb-1.5 flex justify-between text-sm">
-              <span className="text-muted-foreground">{active ? (job.status === "queued" ? "Waiting for a worker…" : "Processing…") : "Progress"}</span>
-              <span className="tabular-nums">{formatNumber(job.processed)} / {formatNumber(job.total)}</span>
+              <span className="text-muted-foreground">
+                {active ? (job.status === "queued" ? "Waiting for a worker…" : "Searching and researching…") : "Progress"}
+                {isWebJob && ` · ${wc.searches ?? 0}/${p.max_searches ?? "?"} searches · ${wc.examined ?? 0} websites researched${p.require_verified_instagram ? " · verified Instagram required" : ""}`}
+              </span>
+              <span className="tabular-nums">
+                {isWebJob ? `${formatNumber(wc.accepted ?? 0)} / ${formatNumber(p.target_count ?? 0)} prospects found` : `${formatNumber(job.processed)} / ${formatNumber(job.total)}`}
+              </span>
             </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-surface-muted" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-              <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${pct}%` }} />
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface-muted" role="progressbar" aria-valuenow={webPct ?? basePct} aria-valuemin={0} aria-valuemax={100}>
+              <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${webPct ?? basePct}%` }} />
             </div>
           </div>
           <dl className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -101,10 +113,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </CardHeader>
         {!events?.length ? <CardContent className="text-sm text-muted-foreground">{active ? "Records will appear as they're processed." : "No records."}</CardContent> : (
           <Table>
-            <THead><TR><TH>Record</TH><TH>Outcome</TH><TH>Detail</TH><TH>Time</TH></TR></THead>
+            <THead><TR><TH>Record</TH><TH>Outcome</TH>{isWebJob && <TH>Instagram</TH>}<TH>Detail</TH><TH>Time</TH></TR></THead>
             <TBody>
               {events.map((e) => {
-                const d = (e.data ?? {}) as { prospect_id?: string | null };
+                const d = (e.data ?? {}) as { prospect_id?: string | null; instagram?: string | null; instagram_status?: string | null; website?: string | null };
                 const o = OUTCOME[e.outcome] ?? { label: e.outcome, tone: "neutral" as const };
                 return (
                   <TR key={e.id}>
@@ -112,7 +124,17 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                       {d.prospect_id ? <Link className="hover:text-accent" href={`/prospects/${d.prospect_id}`}>{isDiscovery ? e.record_ref : "Open prospect"}</Link> : e.record_ref ?? "—"}
                     </TD>
                     <TD><Badge tone={o.tone}>{o.label}</Badge></TD>
-                    <TD className="max-w-96 truncate text-muted-foreground">{e.message ?? ""}</TD>
+                    {isWebJob && (
+                      <TD className="whitespace-nowrap">
+                        {d.instagram ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            <a href={`https://www.instagram.com/${d.instagram}/`} target="_blank" rel="noreferrer noopener" className="text-sm hover:text-accent">@{d.instagram}</a>
+                            <InstagramStatusBadge status={d.instagram_status ?? "unknown"} />
+                          </span>
+                        ) : <span className="text-subtle-foreground">—</span>}
+                      </TD>
+                    )}
+                    <TD className="max-w-96 truncate text-muted-foreground" title={e.message ?? undefined}>{e.message ?? (d.website ? d.website.replace(/^https?:\/\//, "") : "")}</TD>
                     <TD className="whitespace-nowrap text-muted-foreground">{formatDateTime(e.created_at)}</TD>
                   </TR>
                 );

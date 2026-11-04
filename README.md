@@ -87,6 +87,7 @@ Migrations live in `supabase/migrations` and must be applied in filename order:
 4. `…04_seed_project.sql` — the initial, editable Tattoo IQ project (no prospect records)
 5. `…05_harden_function_grants.sql` — tightened function privileges (Supabase security advisor)
 6. `…06_job_worker_scheduler.sql` — free per-minute job scheduling with pg_cron/pg_net (skipped where unavailable)
+7. `…07_web_discovery.sql` — pre-research identity lookups and remembered rejections for agent discovery
 
 With the Supabase CLI:
 
@@ -179,6 +180,24 @@ each a bounded, tool-driven stage:
 - *Qualify*: the model receives the project brief plus numbered source documents; untrusted content is fenced and sanitized. Output is Zod-validated (one repair retry). Evidence citing sources that weren't provided is discarded. The project threshold caps "qualified" recommendations.
 - *Generate*: same provenance rules; every version is kept; a person must approve before Copy & Open is enabled.
 - *Review*: humans approve drafts, verify Instagram profiles, resolve ambiguous identities, and confirm manual sends.
+
+**Agent discovery (web search)** — the primary way to find prospects. Choose a provider in Settings → Discovery providers:
+
+| Provider | Key needed | Notes |
+| --- | --- | --- |
+| Gemini · Google Search grounding | No (reuses the Gemini AI key) | Google bills grounded searches after a monthly free allowance |
+| Serper | Serper API key | 2,500 free queries on sign-up |
+| Brave Search API | Brave subscription token | See Brave's plans |
+| Google Places (optional) | Maps Platform key | Structured listings; no Instagram verification step |
+
+For each city the job plans a handful of queries (website-oriented and `site:instagram.com`), drops directories and listicles, and for every candidate:
+1. checks `lookup_discovery_candidate()` first — businesses already in the project, on the do-not-contact list, or rejected within the refresh interval are skipped **without any fetch or AI call**;
+2. fetches the business's own homepage (robots.txt, SSRF guard) and reads the Instagram links it publishes — an Instagram profile is **verified only when the business website links exactly one profile**; profiles found only in search results must have their website found and must be linked back, otherwise they're rejected (never marked verified);
+3. asks Gemini to validate that the page is a single matching business; names, cities and countries the model returns are used only if they appear in the page or search result;
+4. ingests through `ingest_prospect_candidate()` (atomic dedup), stores the research so qualification doesn't fetch again, and records rejections;
+5. optionally queues AI qualification, then message drafts for qualified prospects. Outreach stays manual via Copy & Open Instagram.
+
+Jobs stop at the requested prospect count or the per-job search budget, whichever comes first, and respect daily AI/discovery caps.
 
 **Duplicate prevention** — identity keys (`instagram_username`, `instagram_id`, `place_id`, `domain`, `phone`) are unique in `identity_keys`; each business appears once per project (`unique (project_id, identity_id)`); ingestion takes advisory locks per key so concurrent imports can't race. Uncertain matches — same name and location without shared identifiers, a shared domain/phone with a different name, or conflicting identifiers — go to **Discover → Review matches** and are never merged automatically. Global identities are never readable by clients, so cross-project detection doesn't expose other projects' data.
 

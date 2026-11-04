@@ -13,7 +13,13 @@ import { formatDateTime } from "@/lib/utils";
 import { removeProviderCredential, saveProviderConfig, setDefaultAIProvider, testProviderConnection } from "@/server/actions/providers";
 import type { SafeProviderConfig } from "@/server/providers";
 
-export function ProviderStatusBadge({ config }: { config?: SafeProviderConfig | null }) {
+export function ProviderStatusBadge({ config, noKey }: { config?: SafeProviderConfig | null; noKey?: boolean }) {
+  if (noKey) {
+    if (!config?.is_enabled) return <Badge>Not enabled</Badge>;
+    if (config.status === "verified") return <Badge tone="success">Connection verified</Badge>;
+    if (config.status === "error") return <Badge tone="danger">Connection failed</Badge>;
+    return <Badge tone="warning">Enabled · not tested</Badge>;
+  }
   if (!config?.has_secret) return <Badge>Not configured</Badge>;
   if (config.status === "verified") return <Badge tone="success">Connection verified</Badge>;
   if (config.status === "error") return <Badge tone="danger">Connection failed</Badge>;
@@ -21,7 +27,7 @@ export function ProviderStatusBadge({ config }: { config?: SafeProviderConfig | 
 }
 
 export function ProviderCard({
-  kind, id, label, description, keyPlaceholder, keyHelpUrl, needsModel, config, encryptionReady, notes,
+  kind, id, label, description, keyPlaceholder, keyHelpUrl, needsModel, config, encryptionReady, notes, noKey, recommended,
 }: {
   kind: "ai" | "discovery";
   id: string;
@@ -33,6 +39,9 @@ export function ProviderCard({
   config: SafeProviderConfig | null;
   encryptionReady: boolean;
   notes?: string[];
+  /** Provider reuses another credential (Gemini search) — no key field. */
+  noKey?: boolean;
+  recommended?: boolean;
 }) {
   const storedModels = useMemo(() => {
     const s = (config?.settings ?? {}) as { models?: string[] };
@@ -63,7 +72,8 @@ export function ProviderCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-md font-semibold">{label}</h3>
-            <ProviderStatusBadge config={config} />
+            <ProviderStatusBadge config={config} noKey={noKey} />
+            {recommended && <Badge tone="accent">Recommended</Badge>}
             {config?.is_default && <Badge tone="accent"><Star /> Default</Badge>}
             {config?.is_enabled && !config.is_default && <Badge tone="info">Enabled</Badge>}
           </div>
@@ -75,6 +85,9 @@ export function ProviderCard({
         </div>
       </CardHeader>
       <CardContent className="grid gap-4 sm:grid-cols-2">
+        {noKey ? (
+          <p className="text-sm text-muted-foreground sm:col-span-2">Uses the Gemini API key and model from <a href="/settings/ai" className="text-accent hover:underline">Settings → AI providers</a>. No separate key is needed.</p>
+        ) : (
         <Field
           label={config?.has_secret ? "Replace API key" : "API key"}
           htmlFor={`${id}-key`}
@@ -96,6 +109,7 @@ export function ProviderCard({
             disabled={!encryptionReady}
           />
         </Field>
+        )}
         {needsModel && (
           <Field label="Model" htmlFor={`${id}-model`} hint={models.length ? `${models.length} models available to this key.` : "Test the connection to load available models, or enter a model ID."}>
             {models.length > 0 && !customModel ? (
@@ -123,7 +137,7 @@ export function ProviderCard({
       </CardContent>
       <CardFooter className="flex-wrap justify-between">
         <div className="flex gap-2">
-          {config?.has_secret && (
+          {config?.has_secret && !noKey && (
             <Confirm
               destructive
               trigger={<Button variant="danger-ghost" size="sm"><KeyRound /> Remove key</Button>}
@@ -138,15 +152,15 @@ export function ProviderCard({
           )}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" loading={test.pending} disabled={!encryptionReady || (!apiKey && !config?.has_secret)} onClick={() => test.execute(apiKey || undefined)}>
+          <Button size="sm" loading={test.pending} disabled={!noKey && (!encryptionReady || (!apiKey && !config?.has_secret))} onClick={() => test.execute(apiKey || undefined)}>
             <PlugZap /> Test connection
           </Button>
           <Button
             size="sm"
             variant="primary"
             loading={save.pending}
-            disabled={!encryptionReady}
-            onClick={() => save.execute({ kind, provider: id, apiKey: apiKey || undefined, model: needsModel ? model : undefined, enabled })}
+            disabled={!encryptionReady && !noKey}
+            onClick={() => save.execute({ kind, provider: id, apiKey: noKey ? undefined : apiKey || undefined, model: needsModel ? model : undefined, enabled })}
           >
             Save
           </Button>

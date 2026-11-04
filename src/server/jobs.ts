@@ -1,7 +1,8 @@
 import "server-only";
 import { z } from "zod";
 import { ProviderError } from "@/lib/ai/types";
-import { buildCandidate, ingestResultSchema, type RawCandidate } from "@/lib/identity/candidate";
+import { ingestRaw } from "./ingest";
+import { webDiscoveryParamsSchema, webDiscoveryStep } from "./web-discovery";
 import type { AdminClient } from "@/lib/supabase/admin";
 import type { Json, Tables } from "@/lib/supabase/database.types";
 import { generateDraft, qualifyProspect } from "./agent";
@@ -30,6 +31,8 @@ export type DiscoveryParams = z.infer<typeof discoveryParamsSchema>;
 export const batchParamsSchema = z.object({
   prospect_ids: z.array(z.string().uuid()).min(1).max(500),
   force_research: z.boolean().optional(),
+  /** Qualification jobs: queue message generation for prospects that end up qualified. */
+  then_generate: z.boolean().optional(),
 });
 
 const LEASE_SECONDS = 120;
@@ -59,18 +62,7 @@ async function bump(db: AdminClient, jobId: string, fields: Partial<Record<"proc
     .eq("id", jobId);
 }
 
-/** Runs `ingest_prospect_candidate` for one raw record. Shared by discovery and CSV import. */
-export async function ingestRaw(db: AdminClient, projectId: string, raw: RawCandidate, jobId: string | null, actorId: string | null) {
-  const candidate = buildCandidate(raw);
-  const { data, error } = await db.rpc("ingest_prospect_candidate", {
-    p_project_id: projectId,
-    p_candidate: candidate as unknown as Json,
-    p_job_id: jobId ?? undefined,
-    p_actor: actorId ?? undefined,
-  });
-  if (error) throw Object.assign(new Error(error.message), { code: error.code });
-  return ingestResultSchema.parse(data);
-}
+export { ingestRaw } from "./ingest";
 
 interface StepOutcome {
   done: boolean;
@@ -156,9 +148,27 @@ async function finish(db: AdminClient, job: Job, status: "completed" | "failed" 
     .eq("lease_token", job.lease_token!);
 }
 
+async function onQualificationComplete(db: AdminClient, job: Job) {
+  const params = batchParamsSchema.safeParse(job.params);
+  if (!params.success || !params.data.then_generate) return;
+  const { data } = await db
+    .from("project_prospects")
+    .select("id")
+    .in("id", params.data.prospect_ids)
+    .eq("qualification_status", "qualified")
+    .eq("do_not_contact", false)
+    .in("outreach_status", ["new", "draft"]);
+  const ids = (data ?? []).map((r) => r.id);
+  if (ids.length === 0) return;
+  await db.from("jobs").insert({ project_id: job.project_id, type: "message_generation", params: { prospect_ids: ids }, total: ids.length, created_by: job.created_by });
+}
+
 async function onDiscoveryComplete(db: AdminClient, job: Job) {
-  const params = discoveryParamsSchema.safeParse(job.params);
-  if (!params.success || !params.data.auto_qualify) return;
+  const web = webDiscoveryParamsSchema.safeParse(job.params);
+  const places = discoveryParamsSchema.safeParse(job.params);
+  const autoQualify = web.success ? web.data.auto_qualify : places.success && places.data.auto_qualify;
+  const thenGenerate = web.success && web.data.auto_generate;
+  if (!autoQualify) return;
   const { data } = await db
     .from("project_prospects")
     .select("id")
@@ -170,7 +180,7 @@ async function onDiscoveryComplete(db: AdminClient, job: Job) {
   await db.from("jobs").insert({
     project_id: job.project_id,
     type: "qualification",
-    params: { prospect_ids: ids },
+    params: { prospect_ids: ids, ...(thenGenerate ? { then_generate: true } : {}) },
     total: ids.length,
     created_by: job.created_by,
   });
@@ -198,7 +208,10 @@ export async function runJobTick(db: AdminClient, opts: { jobId?: string; budget
 
   const deadline = Date.now() + (opts.budgetMs ?? 40_000);
   try {
-    const step = job.type === "discovery" ? await discoveryStep(db, job) : await batchStep(db, job, deadline);
+    const isWeb = job.type === "discovery" && webDiscoveryParamsSchema.safeParse(job.params).success;
+    const step = isWeb
+      ? await webDiscoveryStep(db, job, deadline)
+      : job.type === "discovery" ? await discoveryStep(db, job) : await batchStep(db, job, deadline);
     const { data: fresh } = await db.from("jobs").select("cancel_requested").eq("id", job.id).single();
     const patch = { cursor: step.cursor as Json, ...(step.total !== undefined ? { total: step.total } : {}), attempts: 0 };
     if (fresh?.cancel_requested) {
@@ -210,6 +223,7 @@ export async function runJobTick(db: AdminClient, opts: { jobId?: string; budget
       await db.from("jobs").update(patch).eq("id", job.id);
       await finish(db, job, "completed");
       if (job.type === "discovery") await onDiscoveryComplete(db, job);
+      if (job.type === "qualification") await onQualificationComplete(db, job);
       return { claimed: true as const, jobId: job.id, status: "completed" };
     }
     check(

@@ -22,10 +22,10 @@ export default async function DiscoverySettingsPage() {
     <>
       {!encryptionReady && <EncryptionNotice />}
       <p className="text-sm text-muted-foreground">
-        Discovery providers find businesses. No scraping of Instagram, logins or access-control bypassing is used; Instagram profiles are identified from links businesses publish on their own websites.
+        Web search providers power the discovery agent: it searches the web, opens each business&apos;s own website, and keeps a prospect&apos;s Instagram as <strong className="font-medium text-foreground">verified</strong> only when that website links to it. Google Places is optional. Instagram itself is never scraped, logged into or messaged automatically.
       </p>
       {DISCOVERY_PROVIDERS.map((p) =>
-        p.id === "google_places" ? (
+        p.availability === "available" && p.mode !== "import" ? (
           <ProviderCard
             key={p.id}
             kind="discovery"
@@ -33,8 +33,10 @@ export default async function DiscoverySettingsPage() {
             label={p.label}
             description={p.description}
             keyHelpUrl={p.keyHelpUrl}
-            keyPlaceholder="AIza…"
+            keyPlaceholder={p.keyPlaceholder}
             needsModel={false}
+            noKey={p.usesGeminiKey}
+            recommended={p.recommended}
             config={configs.find((c) => c.provider === p.id) ?? null}
             encryptionReady={encryptionReady}
             notes={p.notes}

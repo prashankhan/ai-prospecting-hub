@@ -3,6 +3,7 @@ import { safeFetchText } from "@/lib/security/safe-fetch";
 import {
   extractFacts,
   extractMetaDescription,
+  extractSiteName,
   extractTitle,
   extractVisibleText,
   isAllowedByRobots,
@@ -13,6 +14,7 @@ export interface WebsiteResearch {
   source_url: string;
   http_status: number | null;
   title: string | null;
+  siteName: string | null;
   description: string | null;
   text: string;
   facts: ExtractedFacts;
@@ -24,7 +26,7 @@ const EMPTY_FACTS: ExtractedFacts = { instagram_usernames: [], instagram_links: 
 /** Fetches a business homepage (robots.txt respected) and extracts published facts. */
 export async function researchWebsite(website: string, timeoutMs: number): Promise<WebsiteResearch> {
   const base: WebsiteResearch = {
-    source_url: website, http_status: null, title: null, description: null, text: "", facts: EMPTY_FACTS, error: null,
+    source_url: website, http_status: null, title: null, siteName: null, description: null, text: "", facts: EMPTY_FACTS, error: null,
   };
   let url: URL;
   try {
@@ -50,6 +52,7 @@ export async function researchWebsite(website: string, timeoutMs: number): Promi
       source_url: page.url,
       http_status: page.status,
       title: extractTitle(page.body),
+      siteName: extractSiteName(page.body),
       description: extractMetaDescription(page.body),
       text: extractVisibleText(page.body),
       facts: extractFacts(page.body, page.url),

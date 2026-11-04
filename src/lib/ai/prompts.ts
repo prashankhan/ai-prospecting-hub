@@ -101,3 +101,31 @@ ${renderSources(sources)}
 Write the message now.`;
   return { system, prompt };
 }
+
+export function buildBusinessValidationPrompt(
+  target: { keywords: string; industry?: string; city?: string; country?: string; idealCustomer?: string; exclusions?: string },
+  page: { url: string; title: string | null; description: string | null; text: string; searchTitle: string; searchSnippet: string },
+) {
+  const system = `You check whether a web page is the official website of a single real business that matches a prospecting search.
+
+${GUARDRAILS}
+- Only report a business name, city or country that is written in the source. Otherwise return null.
+- Directories, lists of businesses, blogs, news, marketplaces, suppliers to the industry, schools and personal portfolios that are not businesses are NOT business websites.
+
+Return JSON exactly matching:
+{"is_business_website": boolean, "matches_target": boolean, "business_name": string | null, "category": string | null, "city": string | null, "country": string | null, "reason": string (one sentence)}`;
+
+  const prompt = `Search target (trusted):
+- Looking for: ${target.keywords}${target.industry ? ` (${target.industry})` : ""}
+- Location: ${[target.city, target.country].filter(Boolean).join(", ") || "any"}
+- Ideal customer: ${target.idealCustomer || "not specified"}
+- Exclude: ${target.exclusions || "nothing specified"}
+
+${renderSources([
+  { ref: "S1", kind: "source_record", label: "Search result", url: page.url, content: `Title: ${page.searchTitle}\nSnippet: ${page.searchSnippet}` },
+  { ref: "S2", kind: "website", label: page.title ?? "Website", url: page.url, content: [page.title, page.description, page.text].filter(Boolean).join("\n") },
+])}
+
+Is S2 the official website of one business that matches the target? A business outside the target location does not match.`;
+  return { system, prompt };
+}

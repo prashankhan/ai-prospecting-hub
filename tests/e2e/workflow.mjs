@@ -96,6 +96,20 @@ try {
     if (await card.getByText("Connection verified").count()) throw new Error("Invalid key was marked verified");
   });
 
+  await step("discovery offers web-search agent providers and honest setup state", async () => {
+    await page.goto(`${BASE}/settings/discovery`);
+    await expectText(page, "Gemini · Google Search grounding");
+    await expectText(page, "Serper (Google Search API)");
+    await expectText(page, "Brave Search API");
+    await shot("05a-settings-discovery");
+    await page.goto(`${BASE}/discover`);
+    const options = await page.locator("#provider option").allInnerTexts();
+    if (!options.some((o) => o.includes("Gemini")) || !options.some((o) => o.includes("Serper"))) throw new Error(`Providers: ${options}`);
+    if (!(await page.getByRole("button", { name: "Start discovery" }).isDisabled())) throw new Error("Start must be disabled until a provider is configured");
+    await expectText(page, "Only businesses with a verified Instagram");
+    await shot("05b-discover-form");
+  });
+
   await step("duplicate prevention settings render with strict defaults", async () => {
     await page.goto(`${BASE}/settings/duplicates`);
     await expectText(page, "Global identity detection");

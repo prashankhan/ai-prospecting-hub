@@ -3,6 +3,7 @@ import { getAIAdapter } from "@/lib/ai/providers";
 import { AI_PROVIDER_IDS, ProviderError, type AIProviderAdapter, type AIProviderId } from "@/lib/ai/types";
 import { createGooglePlacesAdapter } from "@/lib/discovery/providers/google-places";
 import type { DiscoveryAdapter, DiscoveryProviderId } from "@/lib/discovery/types";
+import { getWebSearchAdapter, type WebSearchProviderId } from "@/lib/discovery/web/providers";
 import { decryptSecret } from "@/lib/security/crypto";
 import type { AdminClient } from "@/lib/supabase/admin";
 import type { Tables } from "@/lib/supabase/database.types";
@@ -61,4 +62,37 @@ export async function getDiscoveryCredentials(db: AdminClient, id: DiscoveryProv
     throw new ProviderError(id, "not_configured", "This discovery provider is not configured or is disabled.");
   }
   return { apiKey: decryptSecret(data.encrypted_secret), adapter: getDiscoveryAdapter(id) };
+}
+
+/**
+ * Credentials for a web-search discovery provider. Gemini search reuses the stored Gemini AI
+ * key and model; the others have their own encrypted key.
+ */
+export async function getWebSearchCredentials(db: AdminClient, id: WebSearchProviderId, opts: { requireEnabled?: boolean } = {}) {
+  const { requireEnabled = true } = opts;
+  const { data: row } = await db
+    .from("provider_configs")
+    .select("encrypted_secret, is_enabled")
+    .eq("kind", "discovery")
+    .eq("provider", id)
+    .maybeSingle();
+  if (requireEnabled && !row?.is_enabled) {
+    throw new ProviderError(id, "not_configured", "This discovery provider is disabled. Enable it in Settings → Discovery providers.");
+  }
+  if (id === "gemini_search") {
+    const { data: ai } = await db
+      .from("provider_configs")
+      .select("encrypted_secret, model")
+      .eq("kind", "ai")
+      .eq("provider", "gemini")
+      .maybeSingle();
+    if (!ai?.encrypted_secret || !ai.model) {
+      throw new ProviderError(id, "not_configured", "Gemini search needs a Gemini key and model in Settings → AI providers.");
+    }
+    return { cred: { apiKey: decryptSecret(ai.encrypted_secret), model: ai.model }, adapter: getWebSearchAdapter(id) };
+  }
+  if (!row?.encrypted_secret) {
+    throw new ProviderError(id, "not_configured", "Add an API key for this provider in Settings → Discovery providers.");
+  }
+  return { cred: { apiKey: decryptSecret(row.encrypted_secret) }, adapter: getWebSearchAdapter(id) };
 }

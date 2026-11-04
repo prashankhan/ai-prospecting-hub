@@ -175,6 +175,51 @@ export type Database = {
 
         ];
       };
+      discovery_rejections: {
+        Row: {
+          id: string;
+          project_id: string;
+          key_type: Database["public"]["Enums"]["identity_key_type"];
+          key_value: string;
+          reason: string;
+          job_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          project_id: string;
+          key_type: Database["public"]["Enums"]["identity_key_type"];
+          key_value: string;
+          reason: string;
+          job_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          project_id?: string;
+          key_type?: Database["public"]["Enums"]["identity_key_type"];
+          key_value?: string;
+          reason?: string;
+          job_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "discovery_rejections_job_id_fkey";
+            columns: ["job_id"];
+            isOneToOne: false;
+            referencedRelation: "jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "discovery_rejections_project_id_fkey";
+            columns: ["project_id"];
+            isOneToOne: false;
+            referencedRelation: "projects";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       identity_keys: {
         Row: {
           id: string;
@@ -1181,6 +1226,10 @@ export type Database = {
         Args: { p_project_id: string };
         Returns: boolean;
       };
+      lookup_discovery_candidate: {
+        Args: { p_project_id: string; p_keys: Json };
+        Returns: Json;
+      };
       project_metrics: {
         Args: { p_project_id: string; p_from?: string; p_to?: string };
         Returns: Json;
@@ -1188,6 +1237,10 @@ export type Database = {
       prospect_in_project: {
         Args: { p_prospect_id: string; p_project_id: string };
         Returns: boolean;
+      };
+      record_discovery_rejection: {
+        Args: { p_project_id: string; p_keys: Json; p_reason: string; p_job_id: string };
+        Returns: undefined;
       };
       register_job_worker: {
         Args: { p_app_url: string; p_secret: string };

@@ -24,6 +24,13 @@ export function extractTitle(html: string): string | null {
   return m ? decodeEntities(m[1]).replace(/\s+/g, " ").trim().slice(0, 200) || null : null;
 }
 
+export function extractSiteName(html: string): string | null {
+  const m =
+    html.match(/<meta[^>]+property=["']og:site_name["'][^>]*content=["']([^"']*)["']/i) ??
+    html.match(/<meta[^>]+content=["']([^"']*)["'][^>]*property=["']og:site_name["']/i);
+  return m ? decodeEntities(m[1]).trim().slice(0, 200) || null : null;
+}
+
 export function extractMetaDescription(html: string): string | null {
   const m =
     html.match(/<meta[^>]+name=["']description["'][^>]*content=["']([^"']*)["']/i) ??

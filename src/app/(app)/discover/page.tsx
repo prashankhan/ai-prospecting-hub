@@ -2,7 +2,8 @@ import Link from "next/link";
 import { GitCompareArrows, History, Upload } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { PageHeader, SectionHeader } from "@/components/app/page-header";
-import { DiscoveryForm } from "@/components/discover/discovery-form";
+import { DiscoveryForm, type DiscoveryProviderOption } from "@/components/discover/discovery-form";
+import { DISCOVERY_PROVIDERS } from "@/lib/discovery/types";
 import { JOB_TYPE_LABELS, JobStatusBadge } from "@/components/discover/job-status";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,10 +17,12 @@ import { usageToday } from "@/server/usage";
 
 export const metadata = { title: "Discover" };
 
+const PROVIDER_LABEL: Record<string, string> = { gemini_search: "Gemini search", serper: "Serper", brave: "Brave" };
+
 function describeJob(j: { type: string; provider: string | null; params: unknown }) {
   const p = (j.params ?? {}) as { query?: { keywords?: string; city?: string; country?: string }; file_name?: string; prospect_ids?: string[] };
   if (j.provider === "csv") return `CSV import · ${p.file_name ?? "file"}`;
-  if (j.type === "discovery") return [p.query?.keywords, p.query?.city, p.query?.country].filter(Boolean).join(" · ");
+  if (j.type === "discovery") return [p.query?.keywords, p.query?.city, p.query?.country].filter(Boolean).join(" · ") + (j.provider && j.provider !== "google_places" ? ` · ${PROVIDER_LABEL[j.provider] ?? j.provider}` : "");
   return `${JOB_TYPE_LABELS[j.type]} · ${p.prospect_ids?.length ?? 0} prospects`;
 }
 
@@ -33,17 +36,26 @@ export default async function DiscoverPage() {
     supabase.from("ambiguous_matches").select("id", { count: "exact", head: true }).eq("project_id", project.id).eq("status", "pending"),
   ]);
 
-  let providerReady = false;
+  let providers: DiscoveryProviderOption[] = [];
   let limits = { discovery_max_results_per_job: 60, discovery_daily_requests: 50 };
   let used = 0;
   if (isAdmin) {
     const admin = createAdminClient();
-    const [{ data: cfg }, ws, u] = await Promise.all([
-      admin.from("provider_configs").select("is_enabled, encrypted_secret").eq("kind", "discovery").eq("provider", "google_places").maybeSingle(),
+    const [{ data: cfgs }, { data: gemini }, ws, u] = await Promise.all([
+      admin.from("provider_configs").select("provider, is_enabled, encrypted_secret").eq("kind", "discovery"),
+      admin.from("provider_configs").select("encrypted_secret, model").eq("kind", "ai").eq("provider", "gemini").maybeSingle(),
       getWorkspaceSettings(admin),
       usageToday(admin, "discovery"),
     ]);
-    providerReady = Boolean(cfg?.is_enabled && cfg.encrypted_secret);
+    const cfg = (id: string) => (cfgs ?? []).find((c) => c.provider === id);
+    const geminiReady = Boolean(gemini?.encrypted_secret && gemini.model);
+    providers = DISCOVERY_PROVIDERS.filter((p) => p.mode === "web" || p.mode === "places").map((p) => ({
+      id: p.id as DiscoveryProviderOption["id"],
+      label: p.label,
+      mode: p.mode as "web" | "places",
+      recommended: p.recommended,
+      ready: p.usesGeminiKey ? Boolean(cfg(p.id)?.is_enabled && geminiReady) : Boolean(cfg(p.id)?.is_enabled && cfg(p.id)?.encrypted_secret),
+    }));
     limits = ws.limits;
     used = u;
   }
@@ -65,7 +77,7 @@ export default async function DiscoverPage() {
           <DiscoveryForm
             projectId={project.id}
             defaults={{ industry: proj?.target_industry ?? "", countries: proj?.target_countries ?? [], cities: proj?.target_cities ?? [] }}
-            providerReady={providerReady}
+            providers={providers}
             maxResults={limits.discovery_max_results_per_job}
             remainingRequests={Math.max(0, limits.discovery_daily_requests - used)}
           />

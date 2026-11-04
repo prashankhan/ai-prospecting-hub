@@ -5,6 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/lib/supabase/database.types";
 import { discoveryParamsSchema, registerJobWorker, runJobTick } from "../jobs";
+import { searchBudget, webDiscoveryParamsSchema } from "../web-discovery";
+import { getWebSearchCredentials } from "../providers";
 import { authorize } from "../session";
 import { check, run, UserFacingError, type ActionResult } from "../result";
 import { getProjectPolicy, getWorkspaceSettings, logAudit } from "../settings";
@@ -55,6 +57,42 @@ export async function startDiscovery(projectId: string, input: z.input<typeof di
       await supabase.from("jobs").insert({
         project_id: projectId, type: "discovery", provider: params.provider, params: params as unknown as Json,
         total: params.max_results, created_by: user.id, status: "queued",
+      }).select("id").single(),
+    );
+    await logAudit(admin, { actorId: user.id, projectId, action: "discovery.start", entityType: "job", entityId: job.id, details: params });
+    kickOff(job.id);
+    return { jobId: job.id };
+  }, "Discovery started.");
+}
+
+const webDiscoveryInputSchema = webDiscoveryParamsSchema.omit({ max_searches: true });
+
+/**
+ * Starts the agent workflow: web search → website research → Instagram verification →
+ * Gemini validation → deduplicated ingestion → (optional) qualification and message drafts.
+ */
+export async function startWebDiscovery(projectId: string, input: z.input<typeof webDiscoveryInputSchema>): Promise<ActionResult<{ jobId: string }>> {
+  return run(async () => {
+    const user = await authorize("discovery.run", uuid.parse(projectId));
+    const parsed = webDiscoveryInputSchema.parse(input);
+    const admin = createAdminClient();
+    const { limits } = await getWorkspaceSettings(admin);
+    if (parsed.target_count > limits.discovery_max_results_per_job) {
+      throw new UserFacingError(`The prospect count can't exceed ${limits.discovery_max_results_per_job} (Settings → Discovery providers).`);
+    }
+    // Throws a clear message when the provider or Gemini isn't configured.
+    await getWebSearchCredentials(admin, parsed.provider);
+    const { count: activeAI } = await admin.from("provider_configs").select("id", { count: "exact", head: true }).eq("kind", "ai").eq("is_default", true).eq("is_enabled", true);
+    if (!activeAI) throw new UserFacingError("Web discovery uses AI to validate each business. Configure a default AI provider in Settings → AI providers.");
+    const used = await usageToday(admin, "discovery");
+    const remaining = limits.discovery_daily_requests - used;
+    if (remaining < 1) throw new UserFacingError("No discovery requests left today. Raise the limit in Settings → Discovery providers.");
+    const params = { ...parsed, max_searches: Math.min(searchBudget(parsed.target_count), remaining) };
+    const supabase = await createClient();
+    const job = check(
+      await supabase.from("jobs").insert({
+        project_id: projectId, type: "discovery", provider: params.provider, params: params as unknown as Json,
+        total: params.target_count, created_by: user.id, status: "queued", max_attempts: 5,
       }).select("id").single(),
     );
     await logAudit(admin, { actorId: user.id, projectId, action: "discovery.start", entityType: "job", entityId: job.id, details: params });

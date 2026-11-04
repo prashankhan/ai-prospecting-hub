@@ -32,3 +32,18 @@ describeDb("database job worker scheduler", () => {
     await db.query("select private.ping_job_worker()");
   });
 });
+
+describeDb("discovery lookups are server-only", () => {
+  let db: pg.Pool;
+  beforeAll(() => {
+    db = pool();
+  });
+  afterAll(async () => {
+    await db.end();
+  });
+  it("signed-in users cannot probe identities or record rejections", async () => {
+    const user = await createUser(db, "admin");
+    await expect(asUser(db, user, (c) => c.query("select public.lookup_discovery_candidate(gen_random_uuid(), '[]'::jsonb)"))).rejects.toThrow(/permission denied/);
+    await expect(asUser(db, user, (c) => c.query("select public.record_discovery_rejection(gen_random_uuid(), '[]'::jsonb, 'x', null)"))).rejects.toThrow(/permission denied/);
+  });
+});
