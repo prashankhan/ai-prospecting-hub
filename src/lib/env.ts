@@ -13,7 +13,13 @@ export function serverEnv() {
     serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY ?? "",
     setupToken: process.env.SETUP_TOKEN ?? "",
     cronSecret: process.env.CRON_SECRET ?? "",
-    appUrl: (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")).replace(/\/$/, ""),
+    // VERCEL_PROJECT_PRODUCTION_URL is the stable production domain Vercel provides automatically.
+    appUrl: (
+      process.env.APP_URL ??
+      process.env.NEXT_PUBLIC_APP_URL ??
+      (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : null) ??
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+    ).replace(/\/$/, ""),
   };
 }
 

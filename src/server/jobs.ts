@@ -9,6 +9,7 @@ import { getDiscoveryCredentials } from "./providers";
 import { check, toErrorMessage, UsageLimitError } from "./result";
 import { getWorkspaceSettings } from "./settings";
 import { assertWithinUsage, recordUsage } from "./usage";
+import { serverEnv } from "@/lib/env";
 
 type Job = Tables<"jobs">;
 
@@ -232,4 +233,19 @@ export async function runJobTick(db: AdminClient, opts: { jobId?: string; budget
       .eq("lease_token", job.lease_token!);
     return { claimed: true as const, jobId: job.id, status: "retrying" };
   }
+}
+
+/**
+ * Keeps the database scheduler (supabase/migrations/…06_job_worker_scheduler.sql) pointed at
+ * this deployment. No-op for local/non-https URLs or when CRON_SECRET is missing.
+ */
+export async function registerJobWorker(db: AdminClient): Promise<boolean> {
+  const { appUrl, cronSecret } = serverEnv();
+  if (!/^https:\/\/[a-z0-9.-]+(:[0-9]+)?$/i.test(appUrl) || cronSecret.length < 16) return false;
+  const { data, error } = await db.rpc("register_job_worker", { p_app_url: appUrl.toLowerCase(), p_secret: cronSecret });
+  if (error) {
+    console.error("[jobs] could not register the database job worker:", error.message);
+    return false;
+  }
+  return data === true;
 }

@@ -1189,6 +1189,10 @@ export type Database = {
         Args: { p_prospect_id: string; p_project_id: string };
         Returns: boolean;
       };
+      register_job_worker: {
+        Args: { p_app_url: string; p_secret: string };
+        Returns: boolean;
+      };
       resolve_ambiguous_match: {
         Args: { p_match_id: string; p_resolution: string; p_identity_id?: string; p_actor?: string };
         Returns: Json;

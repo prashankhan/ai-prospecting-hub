@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { Json } from "@/lib/supabase/database.types";
-import { discoveryParamsSchema, runJobTick } from "../jobs";
+import { discoveryParamsSchema, registerJobWorker, runJobTick } from "../jobs";
 import { authorize } from "../session";
 import { check, run, UserFacingError, type ActionResult } from "../result";
 import { getProjectPolicy, getWorkspaceSettings, logAudit } from "../settings";
@@ -12,13 +12,23 @@ import { usageToday } from "../usage";
 
 const uuid = z.string().uuid();
 
+/**
+ * Starts work right after the response is sent and keeps advancing the job for up to ~50 s,
+ * so small jobs finish without any scheduler. Longer jobs continue via the Supabase pg_cron
+ * worker (registered here), the open job page, and the daily Vercel cron sweep.
+ */
 function kickOff(jobId: string) {
-  // Start the first slice right after the response; cron and the progress UI continue it.
   after(async () => {
+    const db = createAdminClient();
+    await registerJobWorker(db);
+    const deadline = Date.now() + 50_000;
     try {
-      await runJobTick(createAdminClient(), { jobId, budgetMs: 25_000 });
+      while (Date.now() < deadline - 5_000) {
+        const res = await runJobTick(db, { jobId, budgetMs: Math.min(30_000, deadline - Date.now() - 5_000) });
+        if (!res.claimed || res.status !== "running") break;
+      }
     } catch (err) {
-      console.error("[jobs] initial tick failed", err instanceof Error ? err.message : err);
+      console.error("[jobs] background tick failed", err instanceof Error ? err.message : err);
     }
   });
 }

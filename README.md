@@ -65,8 +65,8 @@ Copy `.env.example` to `.env.local` for local development, or add the same varia
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | Privileged operations after server-side authorization |
 | `CREDENTIALS_ENCRYPTION_KEY` | **server only** | 32 random bytes, base64. Encrypts provider API keys (AES-256-GCM). Never stored in the database. Changing it makes stored keys unreadable — re-enter them in Settings |
 | `SETUP_TOKEN` | **server only** | One-time token required to create the first administrator at `/setup` |
-| `CRON_SECRET` | **server only** | Authenticates `/api/jobs/tick` (Vercel Cron sends it automatically) |
-| `APP_URL` | server | Public URL used in invitation links, e.g. `https://prospecting.example.com` |
+| `CRON_SECRET` | **server only** | At least 16 characters. Authenticates `/api/jobs/tick` (used by the Supabase scheduler and Vercel Cron) |
+| `APP_URL` | server | Public https URL used in invitation links and by the job scheduler. Optional on Vercel (defaults to the production domain) |
 
 Generate secrets:
 
@@ -86,6 +86,7 @@ Migrations live in `supabase/migrations` and must be applied in filename order:
 3. `…03_functions.sql` — atomic identity ingestion, ambiguous-match resolution, do-not-contact, job leasing, reporting
 4. `…04_seed_project.sql` — the initial, editable Tattoo IQ project (no prospect records)
 5. `…05_harden_function_grants.sql` — tightened function privileges (Supabase security advisor)
+6. `…06_job_worker_scheduler.sql` — free per-minute job scheduling with pg_cron/pg_net (skipped where unavailable)
 
 With the Supabase CLI:
 
@@ -131,14 +132,14 @@ advanced in bounded slices:
 - Failures retry with back-off up to `max_attempts`; fatal errors (bad key, quota, usage cap) stop the job immediately. Per-record failures are logged without stopping the job.
 - Cancellation is checked between records.
 
-Slices are triggered by:
+Slices are triggered by (all free — no paid plan required):
 
-1. **The worker endpoint** `GET /api/jobs/tick` with `Authorization: Bearer $CRON_SECRET`. `vercel.json` schedules it every minute — this requires a Vercel **Pro** plan (Hobby allows daily crons only).
-   On Hobby, either change the schedule to daily and rely on (2) and (3), or drive the endpoint from Supabase with `supabase/optional/pg_cron_worker.sql`.
-2. `after()` — the first slice starts right after the job is created.
-3. The job page — while it's open, it nudges the job forward every few seconds.
+1. **The app itself** — after a job is created, `after()` keeps advancing it for ~50 s, so small jobs (one discovery page, a few qualifications) finish immediately.
+2. **Supabase pg_cron + pg_net** (`…06_job_worker_scheduler.sql`) — every minute the database checks for pending jobs and, **only if there are any**, calls `GET /api/jobs/tick` with the `CRON_SECRET`. The app registers its URL and secret automatically (stored in Supabase Vault) the first time a job runs or the worker endpoint is called, so there's nothing to configure by hand.
+3. **The job page** — while it's open, it nudges the job forward every few seconds.
+4. **A daily Vercel Cron sweep** (`vercel.json`, compatible with the Hobby plan) as a last-resort safety net.
 
-Jobs keep running after the browser closes as long as (1) is configured.
+Jobs keep running after the browser closes via (2). The worker URL is `APP_URL`, or Vercel's production domain when `APP_URL` is unset.
 
 ## Deploying to Vercel
 

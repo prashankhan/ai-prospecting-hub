@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { serverEnv } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { runJobTick } from "@/server/jobs";
+import { registerJobWorker, runJobTick } from "@/server/jobs";
 
 export const maxDuration = 60;
 
@@ -16,12 +16,14 @@ function authorized(request: NextRequest) {
 }
 
 /**
- * Background job worker endpoint. Called by Vercel Cron (or any scheduler) with
- * `Authorization: Bearer $CRON_SECRET`. Processes job slices for up to ~50 seconds.
+ * Background job worker endpoint. Called with `Authorization: Bearer $CRON_SECRET` by the
+ * Supabase pg_cron scheduler (every minute, only while jobs are pending) and by a daily
+ * Vercel Cron sweep. Processes job slices for up to ~50 seconds.
  */
 export async function GET(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const db = createAdminClient();
+  await registerJobWorker(db);
   const started = Date.now();
   const results: { jobId?: string; status?: string }[] = [];
   while (Date.now() - started < 45_000) {
