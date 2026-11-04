@@ -119,3 +119,51 @@ describeDb("project isolation and permissions (RLS)", () => {
     await db.query("update jobs set status = 'completed' where project_id = $1", [p]);
   });
 });
+
+describeDb("database-enforced workflow rules for direct API access", () => {
+  let db: pg.Pool;
+  let project: string;
+  let operator: string;
+  let prospect: string;
+  beforeAll(async () => {
+    db = pool();
+    project = await createProject(db);
+    operator = await createUser(db, "operator");
+    await addMember(db, project, operator);
+    prospect = (await ingest(db, project, candidate("Rules Studio", [{ type: "domain", value: `${uid()}.rules.com` }]))).prospect_id!;
+  });
+  afterAll(async () => {
+    await db.end();
+  });
+
+  it("operators cannot create jobs (paid usage) directly", async () => {
+    await expect(
+      asUser(db, operator, (c) => c.query("insert into jobs (project_id, type, created_by) values ($1, 'discovery', $2)", [project, operator])),
+    ).rejects.toThrow(/row-level security/);
+  });
+
+  it("operators cannot assign prospects directly", async () => {
+    await expect(
+      asUser(db, operator, (c) => c.query("update project_prospects set assigned_to = $1 where id = $2", [operator, prospect])),
+    ).rejects.toThrow(/Only administrators can assign/);
+  });
+
+  it("outcomes cannot be recorded before contact, and contact requires an approved message", async () => {
+    await expect(
+      asUser(db, operator, (c) => c.query("update project_prospects set outreach_status = 'interested' where id = $1", [prospect])),
+    ).rejects.toThrow(/approved message/);
+    await expect(
+      asUser(db, operator, (c) => c.query("update project_prospects set outreach_status = 'contacted', last_contacted_at = now() where id = $1", [prospect])),
+    ).rejects.toThrow(/approved message/);
+    await asUser(db, operator, async (c) => {
+      await c.query("insert into message_drafts (project_id, prospect_id, version, body, status, origin) values ($1, $2, 1, 'Hello there', 'approved', 'manual')", [project, prospect]);
+      await c.query("update project_prospects set outreach_status = 'approved' where id = $1", [prospect]);
+      await c.query("update project_prospects set outreach_status = 'contacted', last_contacted_at = now() where id = $1", [prospect]);
+    });
+    await expect(
+      asUser(db, operator, (c) => c.query("update project_prospects set outreach_status = 'approved' where id = $1", [prospect])),
+    ).rejects.toThrow(/cannot return to a pre-contact/);
+    const ok = await asUser(db, operator, (c) => c.query("update project_prospects set outreach_status = 'responded' where id = $1", [prospect]));
+    expect(ok.rowCount).toBe(1);
+  });
+});

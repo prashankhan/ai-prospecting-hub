@@ -47,6 +47,7 @@ export function ProviderCard({
   const save = useAction(saveProviderConfig, { onSuccess: () => setApiKey("") });
   const test = useAction(testProviderConnection.bind(null, kind, id), {
     success: (d) => d.message,
+    refreshOnError: true,
     onSuccess: (d) => {
       if (d.models.length) setModels(d.models);
     },

@@ -58,17 +58,24 @@ export async function adminExists(): Promise<boolean> {
  * environment and only works while no administrator exists, so the public cannot self-promote.
  */
 export async function bootstrapAdmin(_: unknown, form: FormData): Promise<ActionResult> {
-  return run(async () => {
+  const result = await run(async () => {
     const { setupToken } = serverEnv();
     if (!setupToken) throw new UserFacingError("SETUP_TOKEN is not configured in the environment.");
     const token = String(form.get("token") ?? "");
-    if (!tokenMatches(token, setupToken)) throw new UserFacingError("The setup token is incorrect.");
+    const admin = createAdminClient();
+    // Durable rate limit across serverless instances: at most 10 failed attempts per 15 minutes.
+    const since = new Date(Date.now() - 15 * 60_000).toISOString();
+    const { count: failures } = await admin.from("audit_logs").select("id", { count: "exact", head: true }).eq("action", "auth.setup_failed").gte("created_at", since);
+    if ((failures ?? 0) >= 10) throw new UserFacingError("Too many failed attempts. Try again in 15 minutes.");
+    if (!tokenMatches(token, setupToken)) {
+      await logAudit(admin, { actorId: null, action: "auth.setup_failed" });
+      throw new UserFacingError("The setup token is incorrect.");
+    }
     if (await adminExists()) throw new UserFacingError("An administrator already exists. Sign in instead.");
 
     const parsed = credentialsSchema.extend({ full_name: z.string().trim().min(1).max(120) }).parse({
       email: form.get("email"), password: form.get("password"), full_name: form.get("full_name"),
     });
-    const admin = createAdminClient();
     const { data, error } = await admin.auth.admin.createUser({
       email: parsed.email,
       password: parsed.password,
@@ -86,6 +93,8 @@ export async function bootstrapAdmin(_: unknown, form: FormData): Promise<Action
     await supabase.auth.signInWithPassword({ email: parsed.email, password: parsed.password });
     return undefined;
   }, "Administrator created.");
+  if (result.ok) redirect("/projects");
+  return result;
 }
 
 export async function setPassword(_: unknown, form: FormData): Promise<ActionResult> {

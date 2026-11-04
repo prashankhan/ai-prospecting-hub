@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { updateOwnProfile } from "@/server/actions/auth";
+import { submitWithoutReset } from "@/components/app/auth-forms";
 
 export function ThemePicker() {
   const { theme, setTheme } = useTheme();
@@ -42,7 +43,7 @@ export function ProfileForm({ fullName, email }: { fullName: string | null; emai
     else if (state && !state.ok) toast.error(state.error);
   }, [state]);
   return (
-    <form action={action} className="grid max-w-md gap-4">
+    <form onSubmit={submitWithoutReset(action)} className="grid max-w-md gap-4">
       <Field label="Full name" htmlFor="full_name">
         <Input id="full_name" name="full_name" defaultValue={fullName ?? ""} required maxLength={120} />
       </Field>

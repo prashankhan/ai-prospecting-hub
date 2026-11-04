@@ -90,6 +90,29 @@ begin
     new.outreach_status := 'do_not_contact';
   end if;
 
+  -- Defence in depth for direct API access: assignment is an administrator action.
+  if new.assigned_to is distinct from old.assigned_to and public.is_end_user_request() and not public.is_admin() then
+    raise exception 'Only administrators can assign prospects' using errcode = '42501';
+  end if;
+
+  -- Outreach status rules (mirrors src/lib/domain/outreach.ts).
+  if new.outreach_status is distinct from old.outreach_status and public.is_end_user_request() then
+    if old.outreach_status in ('contacted', 'responded', 'interested', 'not_interested', 'trial_registered', 'converted')
+       and new.outreach_status in ('new', 'draft', 'ready_for_review', 'approved') then
+      raise exception 'A contacted prospect cannot return to a pre-contact status' using errcode = 'P0001';
+    end if;
+    if old.outreach_status in ('new', 'draft', 'ready_for_review', 'approved')
+       and new.outreach_status in ('contacted', 'responded', 'interested', 'not_interested', 'trial_registered', 'converted') then
+      if new.outreach_status <> 'contacted' or new.last_contacted_at is null or old.outreach_status <> 'approved'
+         or not exists (select 1 from public.message_drafts d where d.prospect_id = new.id and d.status = 'approved') then
+        raise exception 'Prospects can only be marked contacted from an approved message' using errcode = 'P0001';
+      end if;
+    end if;
+    if old.outreach_status = 'do_not_contact' and not public.is_admin() then
+      raise exception 'Only administrators can lift a do-not-contact flag' using errcode = '42501';
+    end if;
+  end if;
+
   if new.last_contacted_at is distinct from old.last_contacted_at and new.last_contacted_at is not null then
     if old.do_not_contact or new.do_not_contact then
       raise exception 'Prospect is marked do not contact' using errcode = 'P0001';
@@ -180,8 +203,9 @@ create policy project_members_write on public.project_members for all to authent
 -- jobs
 create policy jobs_select on public.jobs for select to authenticated
   using (public.is_project_member(project_id));
+-- Jobs can trigger paid provider usage, so only administrators may create them.
 create policy jobs_insert on public.jobs for insert to authenticated
-  with check (public.is_project_member(project_id) and status = 'queued' and created_by = auth.uid());
+  with check (public.is_admin() and public.is_project_member(project_id) and status = 'queued' and created_by = auth.uid());
 
 create policy job_events_select on public.job_events for select to authenticated
   using (public.is_project_member(project_id));

@@ -15,7 +15,7 @@ export default async function SetPasswordPage() {
           <h1 className="text-lg font-semibold">Set your password</h1>
           <p className="text-sm text-muted-foreground">Signed in as {user.email}</p>
         </div>
-        <SetPasswordForm />
+        <SetPasswordForm redirectTo="/dashboard" />
       </CardContent>
     </Card>
   );

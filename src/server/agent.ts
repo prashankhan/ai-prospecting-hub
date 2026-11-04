@@ -204,6 +204,8 @@ function buildSources(prospect: Prospect, research: Tables<"research_results">[]
 // Stage: qualify
 // ---------------------------------------------------------------------------
 export async function qualifyProspect(db: AdminClient, prospectId: string, ctx: AgentContext & { forceResearch?: boolean }) {
+  await getActiveAI(db); // fail fast before spending a website fetch
+  await assertWithinUsage(db, "ai");
   const { prospect: initial, project } = await loadProspect(db, prospectId);
   const [policy, { limits }] = await Promise.all([getProjectPolicy(db, project.id), getWorkspaceSettings(db)]);
   const { prospect, research } = await researchProspect(db, initial, policy, {
@@ -260,6 +262,8 @@ export async function qualifyProspect(db: AdminClient, prospectId: string, ctx: 
 // Stage: generate
 // ---------------------------------------------------------------------------
 export async function generateDraft(db: AdminClient, prospectId: string, ctx: AgentContext) {
+  await getActiveAI(db);
+  await assertWithinUsage(db, "ai");
   const { prospect: initial, project } = await loadProspect(db, prospectId);
   const policy = await getProjectPolicy(db, project.id);
   if (initial.do_not_contact) throw new UserFacingError("This prospect is marked do not contact.");

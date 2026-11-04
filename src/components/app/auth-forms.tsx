@@ -1,10 +1,20 @@
 "use client";
-import { useActionState, useEffect } from "react";
+import { startTransition, useActionState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "./field";
 import { bootstrapAdmin, setPassword, signIn } from "@/server/actions/auth";
+
+/** Submits without React's automatic form reset, so typed values survive a validation error. */
+export function submitWithoutReset(action: (fd: FormData) => void) {
+  return (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    startTransition(() => action(fd));
+  };
+}
 
 function FormError({ state }: { state: { ok: boolean; error?: string } | null }) {
   if (!state || state.ok || !("error" in state)) return null;
@@ -14,7 +24,7 @@ function FormError({ state }: { state: { ok: boolean; error?: string } | null })
 export function LoginForm({ next, notice }: { next?: string; notice?: string }) {
   const [state, action, pending] = useActionState(signIn, null);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form onSubmit={submitWithoutReset(action)} className="flex flex-col gap-4">
       {notice && <p className="rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-muted-foreground">{notice}</p>}
       <FormError state={state} />
       <input type="hidden" name="next" value={next ?? ""} />
@@ -31,12 +41,8 @@ export function LoginForm({ next, notice }: { next?: string; notice?: string }) 
 
 export function SetupForm() {
   const [state, action, pending] = useActionState(bootstrapAdmin, null);
-  const router = useRouter();
-  useEffect(() => {
-    if (state?.ok) router.push("/projects");
-  }, [state, router]);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form onSubmit={submitWithoutReset(action)} className="flex flex-col gap-4">
       <FormError state={state} />
       <Field label="Setup token" htmlFor="token" hint="The SETUP_TOKEN value from your hosting environment.">
         <Input id="token" name="token" type="password" required autoComplete="off" />
@@ -55,17 +61,19 @@ export function SetupForm() {
   );
 }
 
-export function SetPasswordForm() {
+export function SetPasswordForm({ redirectTo }: { redirectTo?: string }) {
   const [state, action, pending] = useActionState(setPassword, null);
   const router = useRouter();
   useEffect(() => {
-    if (state?.ok) router.push("/dashboard");
-  }, [state, router]);
+    if (!state?.ok) return;
+    if (redirectTo) router.push(redirectTo);
+    else toast.success("Password saved.");
+  }, [state, router, redirectTo]);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form onSubmit={submitWithoutReset(action)} className="flex flex-col gap-4">
       <FormError state={state} />
       <Field label="New password" htmlFor="password" hint="At least 8 characters.">
-        <Input id="password" name="password" type="password" required minLength={8} autoComplete="new-password" autoFocus />
+        <Input id="password" name="password" type="password" required minLength={8} autoComplete="new-password" />
       </Field>
       <Field label="Confirm password" htmlFor="confirm">
         <Input id="confirm" name="confirm" type="password" required minLength={8} autoComplete="new-password" />

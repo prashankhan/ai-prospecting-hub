@@ -67,9 +67,11 @@ export async function updateUserAccess(userId: string, patch: { role?: "admin" |
     if (id === actor.id && p.status === "disabled") throw new UserFacingError("You can't disable your own account.");
     const { error } = await admin.from("profiles").update({ ...(p.role ? { app_role: p.role } : {}), ...(p.status ? { status: p.status } : {}) }).eq("id", id);
     if (error) throw new Error(error.message);
-    if (p.status === "disabled") {
-      // Revoke sessions so access ends immediately, not at token expiry.
-      await admin.auth.admin.signOut(id).catch(() => undefined);
+    if (p.status) {
+      // Database access ends immediately via the profile status (RLS + session checks);
+      // banning also prevents new sign-ins and token refreshes.
+      const { error: banError } = await admin.auth.admin.updateUserById(id, { ban_duration: p.status === "disabled" ? "876000h" : "none" });
+      if (banError) console.error("[team] ban update failed:", banError.message);
     }
     await logAudit(admin, { actorId: actor.id, action: "team.update_access", entityType: "profile", entityId: id, details: p });
     return undefined;

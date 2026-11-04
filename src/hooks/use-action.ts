@@ -11,11 +11,11 @@ type Result<T> = { ok: true; data: T; message?: string } | { ok: false; error: s
  */
 export function useAction<A extends unknown[], T>(
   action: (...args: A) => Promise<Result<T>>,
-  opts: { success?: string | ((data: T) => string) | false; refresh?: boolean; onSuccess?: (data: T) => void; onError?: (error: string) => void } = {},
+  opts: { success?: string | ((data: T) => string) | false; refresh?: boolean; refreshOnError?: boolean; onSuccess?: (data: T) => void; onError?: (error: string) => void } = {},
 ) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
-  const { success, refresh = true, onSuccess, onError } = opts;
+  const { success, refresh = true, refreshOnError = false, onSuccess, onError } = opts;
 
   const execute = useCallback(
     (...args: A) =>
@@ -35,11 +35,12 @@ export function useAction<A extends unknown[], T>(
           } else {
             toast.error(res.error);
             onError?.(res.error);
+            if (refreshOnError) router.refresh();
           }
           resolve(res);
         });
       }),
-    [action, success, refresh, onSuccess, onError, router],
+    [action, success, refresh, refreshOnError, onSuccess, onError, router],
   );
 
   return { execute, pending };
