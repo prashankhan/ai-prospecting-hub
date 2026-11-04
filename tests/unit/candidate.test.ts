@@ -63,3 +63,12 @@ describe("buildCandidate", () => {
     expect(() => buildCandidate({ business_name: "  ", source: "csv" })).toThrow();
   });
 });
+
+import { guessMapping } from "@/lib/csv/import";
+describe("CSV column mapping", () => {
+  it("guesses common headers", () => {
+    expect(guessMapping(["Studio Name", "Website", "Instagram_URL", "City", "Country", "Notes"])).toEqual({
+      business_name: "Studio Name", website: "Website", instagram: "Instagram_URL", city: "City", country: "Country",
+    });
+  });
+});

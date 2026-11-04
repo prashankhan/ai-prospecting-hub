@@ -3,6 +3,7 @@ import { CheckCircle2, CircleAlert } from "lucide-react";
 import { SetupForm } from "@/components/app/auth-forms";
 import { Card, CardContent } from "@/components/ui/card";
 import { configurationStatus } from "@/lib/env";
+import { connection } from "next/server";
 import { adminExists } from "@/server/actions/auth";
 
 export const metadata = { title: "Setup" };
@@ -16,6 +17,7 @@ const LABELS: Record<string, string> = {
 };
 
 export default async function SetupPage() {
+  await connection();
   const status = configurationStatus();
   const ready = status.supabase && status.serviceRole && status.setupToken;
   let hasAdmin = false;

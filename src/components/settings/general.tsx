@@ -1,6 +1,6 @@
 "use client";
 import { useTheme } from "next-themes";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { Field } from "@/components/app/field";
@@ -11,8 +11,7 @@ import { updateOwnProfile } from "@/server/actions/auth";
 
 export function ThemePicker() {
   const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
   const options = [
     { id: "light", label: "Light", Icon: Sun },
     { id: "dark", label: "Dark", Icon: Moon },

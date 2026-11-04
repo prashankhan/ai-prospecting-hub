@@ -7,6 +7,10 @@ import type { NextConfig } from "next";
  */
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  experimental: {
+    // CSV imports are capped at 2 MB; allow multipart overhead.
+    serverActions: { bodySizeLimit: "3mb" },
+  },
   turbopack: {
     rules: {
       "*.css": {

@@ -1,6 +1,7 @@
 import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { cache } from "react";
 import { assertCan, ForbiddenError, type AppRole, type Capability } from "@/lib/domain/permissions";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -21,6 +22,8 @@ export type ProjectSummary = Pick<Tables<"projects">, "id" | "name" | "status" |
 
 /** Verified user + profile for this request (null when signed out or not configured). */
 export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
+  // Always render per request: these pages depend on the session, never prerender them.
+  await connection();
   if (!isSupabaseConfigured()) return null;
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getUser();
@@ -41,6 +44,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
 });
 
 export async function requireUser(): Promise<SessionUser> {
+  await connection();
   if (!isSupabaseConfigured()) redirect("/setup");
   const user = await getSessionUser();
   if (!user) redirect("/login");

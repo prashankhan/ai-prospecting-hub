@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { LoginForm } from "@/components/app/auth-forms";
 import { Card, CardContent } from "@/components/ui/card";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -13,6 +14,7 @@ const NOTICES: Record<string, string> = {
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
+  await connection();
   if (!isSupabaseConfigured()) redirect("/setup");
   const { next, error } = await searchParams;
   const user = await getSessionUser();
